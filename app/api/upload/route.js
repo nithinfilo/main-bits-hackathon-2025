@@ -35,23 +35,43 @@ export async function POST(req) {
     const filename = `${uuidv4()}-${encodeURIComponent(file.name)}`;
     const fileUpload = bucket.file(filename);
 
-    // Upload the file without using streams
-    await fileUpload.save(Buffer.from(buffer), {
-      metadata: {
-        contentType: file.type,
-      },
-      resumable: false, // Disable resumable uploads
+    // Create a promise to properly handle the upload
+    const uploadPromise = new Promise((resolve, reject) => {
+      const blobStream = fileUpload.createWriteStream({
+        metadata: {
+          contentType: file.type,
+        },
+        resumable: false,
+      });
+
+      blobStream.on('error', (error) => {
+        reject(error);
+      });
+
+      blobStream.on('finish', async () => {
+        try {
+          // Generate a signed URL valid for 1 hour
+          const [url] = await fileUpload.getSignedUrl({
+            action: 'read',
+            expires: Date.now() + 1000 * 60 * 60, // 1 hour
+          });
+          resolve(url);
+        } catch (error) {
+          reject(error);
+        }
+      });
+
+      // End the stream with the buffer data
+      blobStream.end(Buffer.from(buffer));
     });
 
-    // Generate a signed URL valid for 1 hour
-    const [url] = await fileUpload.getSignedUrl({
-      action: 'read',
-      expires: Date.now() + 1000 * 60 * 60, // 1 hour
-    });
-
+    const url = await uploadPromise;
     return NextResponse.json({ url });
   } catch (error) {
     console.error("Error uploading file:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ 
+      error: "Internal server error", 
+      details: error.message 
+    }, { status: 500 });
   }
 }
