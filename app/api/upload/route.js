@@ -1,23 +1,15 @@
 import { NextResponse } from 'next/server';
 import { Storage } from '@google-cloud/storage';
 import { v4 as uuidv4 } from 'uuid';
-import { Readable } from 'stream';
 
-// Configure Google Cloud Storage with environment variabless
+// Critical Fix: Use full service account JSON to avoid newline issues
+const serviceAccount = JSON.parse(process.env.GCP_SERVICE_ACCOUNT_JSON);
+
 const storage = new Storage({
-  projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
+  projectId: serviceAccount.project_id,
   credentials: {
-    type: 'service_account',
-    project_id: process.env.GOOGLE_CLOUD_PROJECT_ID,
-    private_key_id: process.env.GCP_PRIVATE_KEY_ID,
-    private_key: process.env.GCP_PRIVATE_KEY?.replace(/\\n/g, '\n'), // Handle escaped newlines
-    client_email: process.env.GCP_CLIENT_EMAIL,
-    client_id: process.env.GCP_CLIENT_ID,
-    auth_uri: 'https://accounts.google.com/o/oauth2/auth',
-    token_uri: 'https://oauth2.googleapis.com/token',
-    auth_provider_x509_cert_url: 'https://www.googleapis.com/oauth2/v1/certs',
-    client_x509_cert_url: process.env.GCP_CLIENT_X509_CERT_URL,
-    universe_domain: 'googleapis.com',
+    ...serviceAccount,
+    private_key: serviceAccount.private_key.replace(/\\n/g, '\n')
   }
 });
 
@@ -32,39 +24,32 @@ export async function POST(req) {
       return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
     }
 
+    const buffer = await file.arrayBuffer();
     const filename = `${uuidv4()}-${encodeURIComponent(file.name)}`;
     const fileUpload = bucket.file(filename);
-    
-    // Create a readable stream from the file buffer
-    const buffer = await file.arrayBuffer();
-    const fileStream = Readable.from(Buffer.from(buffer));
 
-    // Upload the file using a stream
-    const stream = fileUpload.createWriteStream({
-      metadata: {
-        contentType: file.type,
-      },
-      resumable: false, // Disable resumable uploads
-    });
+    // Emergency upload fix with timeout handling
+    await Promise.race([
+      fileUpload.save(Buffer.from(buffer), {
+        metadata: { contentType: file.type },
+        resumable: false,
+      }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Upload timeout')), 10000)
+      )
+    ]);
 
-    // Pipe the file buffer to the stream
-    fileStream.pipe(stream);
-
-    // Wait for the upload to finish
-    await new Promise((resolve, reject) => {
-      stream.on('finish', resolve);
-      stream.on('error', reject);
-    });
-
-    // Generate a signed URL valid for 1 hour
     const [url] = await fileUpload.getSignedUrl({
       action: 'read',
-      expires: Date.now() + 1000 * 60 * 60, // 1 hour
+      expires: Date.now() + 3600000,
     });
 
     return NextResponse.json({ url });
   } catch (error) {
-    console.error("Error uploading file:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    console.error("CRITICAL UPLOAD ERROR:", error);
+    return NextResponse.json(
+      { error: `Upload failed: ${error.message}` },
+      { status: 500 }
+    );
   }
 }
