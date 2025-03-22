@@ -16,7 +16,7 @@ const storage = new Storage({
     token_uri: 'https://oauth2.googleapis.com/token',
     auth_provider_x509_cert_url: 'https://www.googleapis.com/oauth2/v1/certs',
     client_x509_cert_url: process.env.GCP_CLIENT_X509_CERT_URL,
-    universe_domain: 'googleapis.com'
+    universe_domain: 'googleapis.com',
   }
 });
 
@@ -24,7 +24,6 @@ const bucket = storage.bucket(process.env.GCS_BUCKET_NAME);
 
 export async function POST(req) {
   try {
-    // Handle form data
     const formData = await req.formData();
     const file = formData.get('file');
 
@@ -32,35 +31,39 @@ export async function POST(req) {
       return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
     }
 
-    // Convert to buffer
-    const buffer = Buffer.from(await file.arrayBuffer());
     const filename = `${uuidv4()}-${encodeURIComponent(file.name)}`;
+    const fileUpload = bucket.file(filename);
     
-    // Upload directly using the uploadFromBuffer method
-    await bucket.file(filename).save(buffer, {
-      contentType: file.type,
-      public: false,
-      validation: false,
-      resumable: false, // Disable resumable uploads for serverless environments
+    // Create a readable stream from the file buffer
+    const buffer = await file.arrayBuffer();
+    const fileStream = Readable.from(Buffer.from(buffer));
+
+    // Upload the file using a stream
+    const stream = fileUpload.createWriteStream({
+      metadata: {
+        contentType: file.type,
+      },
+      resumable: false, // Disable resumable uploads
     });
 
-    // Generate a signed URL after upload completes
-    const [url] = await bucket.file(filename).getSignedUrl({
+    // Pipe the file buffer to the stream
+    fileStream.pipe(stream);
+
+    // Wait for the upload to finish
+    await new Promise((resolve, reject) => {
+      stream.on('finish', resolve);
+      stream.on('error', reject);
+    });
+
+    // Generate a signed URL valid for 1 hour
+    const [url] = await fileUpload.getSignedUrl({
       action: 'read',
       expires: Date.now() + 1000 * 60 * 60, // 1 hour
     });
 
-    // Return the URL
     return NextResponse.json({ url });
   } catch (error) {
-    console.error("Error uploading file:", error.message);
-    console.error(error.stack);
-    
-    // Return detailed error information
-    return NextResponse.json({ 
-      error: "File upload failed", 
-      message: error.message,
-      stack: error.stack
-    }, { status: 500 });
+    console.error("Error uploading file:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
