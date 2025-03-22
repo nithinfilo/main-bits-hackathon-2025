@@ -26,12 +26,12 @@ const userSchema = mongoose.Schema(
     // Used to determine if the user has access to the product—it's turn on/off by the Stripe webhook
     hasAccess: {
       type: Boolean,
-      default: false,
+      default: true,
     },
     // Adding credits field to track user credits
     credits: {
       type: Number,
-      default: 0,  // Set initial value to 0
+      default: 10000,  // Set initial value to 0
       min: 0,      // Ensure the value doesn't go below 0
     },
     // Adding trialEndsAt field to track the end of the trial period
