@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { Storage } from '@google-cloud/storage';
 import { v4 as uuidv4 } from 'uuid';
-import { Readable } from 'nodemailer/lib/xoauth2';
-// Configure Google Cloud Storage with environment variables
+import { Readable } from 'stream';
+
+// Configure Google Cloud Storage with environment variabless
 const storage = new Storage({
   projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
   credentials: {
