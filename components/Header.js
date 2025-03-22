@@ -95,15 +95,7 @@ const Header = () => {
               title={`${config.appName} homepage`}
               href="/"
             >
-              <Image
-                src={logo}
-                alt={`${config.appName} logo`}
-                className="w-8"
-                placeholder="blur"
-                priority={true}
-                width={32}
-                height={32}
-              />
+              
               <span className="font-extrabold text-lg text-white">{config.appName}</span>
             </Link>
             <button
